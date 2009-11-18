@@ -3,7 +3,7 @@
 
 =author         Cornelius
 
-=version_from   vimlib/plugin/perl-completion.vim
+=version_from   vimlib/ftplugin/perl/perl-completion.vim
 
 =vim_version    >= 7.0
 
@@ -12,8 +12,6 @@
 =script_id      2852
 
 =dependency
-
-#    [name] >= [version]
 
     libperl.vim
         | autoload/libperl.vim | http://github.com/c9s/libperl.vim/raw/master/vimlib/autoload/libperl.vim
