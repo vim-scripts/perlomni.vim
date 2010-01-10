@@ -2,7 +2,7 @@
 " Plugin:  perl-completion.vim
 " Author:  Cornelius
 " Email:   cornelius.howl@gmail.com 
-" Version: 1.6
+" Version: 1.71
 
 
 " Options:
@@ -26,32 +26,60 @@ fun! s:FindVarPackageName(var)
   endfor
 endf
 
+
+
+let g:p5bfunctions = ["abs", "accept", "alarm", "atan2", "bind", "binmode", "bless", "break",
+ \ "caller", "chdir", "chmod", "chomp", "chop", "chown", "chr", "chroot",
+ \ "close", "closedir", "connect", "continue", "cos", "crypt", "dbmclose",
+ \ "dbmopen", "defined", "delete", "die", "do", "dump", "each", "endgrent",
+ \ "endhostent", "endnetent", "endprotoent", "endpwent", "endservent", "eof",
+ \ "eval", "exec", "exists", "exit", "exp", "fcntl", "fileno", "flock", "fork",
+ \ "format", "formline", "getc", "getgrent", "getgrgid", "getgrnam",
+ \ "gethostbyaddr", "gethostbyname", "gethostent", "getlogin", "getnetbyaddr",
+ \ "getnetbyname", "getnetent", "getpeername", "getpgrp", "getppid",
+ \ "getpriority", "getprotobyname", "getprotobynumber", "getprotoent",
+ \ "getpwent", "getpwnam", "getpwuid", "getservbyname", "getservbyport",
+ \ "getservent", "getsockname", "getsockopt", "glob", "gmtime", "goto", "grep",
+ \ "hex", "import", "index", "int", "ioctl", "join", "keys", "kill", "last",
+ \ "lc", "lcfirst", "length", "link", "listen", "local", "localtime", "lock",
+ \ "log", "lstat", "m", "map", "mkdir", "msgctl", "msgget", "msgrcv", "msgsnd",
+ \ "my", "next", "no", "oct", "open", "opendir", "ord", "our", "pack", "package",
+ \ "pipe", "pop", "pos", "print", "printf", "prototype", "push", "q", "qq", "qr",
+ \ "quotemeta", "qw", "qx", "rand", "read", "readdir", "readline", "readlink",
+ \ "readpipe", "recv", "redo", "ref", "rename", "require", "reset", "return",
+ \ "reverse", "rewinddir", "rindex", "rmdir", "s", "say", "scalar", "seek",
+ \ "seekdir", "select", "semctl", "semget", "semop", "send", "setgrent",
+ \ "sethostent", "setnetent", "setpgrp", "setpriority", "setprotoent",
+ \ "setpwent", "setservent", "setsockopt", "shift", "shmctl", "shmget",
+ \ "shmread", "shmwrite", "shutdown", "sin", "sleep", "socket", "socketpair",
+ \ "sort", "splice", "split", "sprintf", "sqrt", "srand", "stat", "state",
+ \ "study", "sub", "substr", "symlink", "syscall", "sysopen", "sysread",
+ \ "sysseek", "system", "syswrite", "tell", "telldir", "tie", "tied", "time",
+ \ "times", "tr", "truncate", "uc", "ucfirst", "umask", "undef", "unlink",
+ \ "unpack", "unshift", "untie", "use", "utime", "values", "vec", "wait",
+ \ "waitpid", "wantarray", "warn", "write", "y"]
+
 " complete perl built-in functions
 fun! s:CompleteBFunctions(base)
+  cal extend(s:comp_items,map(filter(copy(g:p5bfunctions),'v:val =~ ''^'.a:base.'''' ),'{ "word" : v:val , "kind": "f" }') )
+endf
 
-  " find cache
-  if !exists('g:p5functions') 
-    let g:p5bfunctions = readfile( expand('~/.vim/perl/perl-functions') )
-  endif
-
-  for f in g:p5bfunctions
-    let idx = stridx(f,' ')
-    let f = strpart( f,0,idx )
-    if f =~ '^'.a:base
-      "cal complete_add( { 'word' : f , 'kind': 'f' } )
-      cal add(s:comp_items, { 'word' : f , 'kind': 'f' } )
-    endif
+fun! s:GrepFileFunctions(file)
+  let lines = filter(readfile(a:file),'v:val =~ ''^\s*sub\s''')
+  let funcs = []
+  for l in lines
+    cal add(funcs,matchstr(l,'\(^\s*sub\s\+\)\@<=\w\+'))
   endfor
+  return funcs
 endf
 
 fun! s:CompleteSelfFunctions(file,base)
-
   if ! exists('g:p5sfunctions')
     let g:p5sfunctions = {}
   endif
 
   if ! exists('g:p5sfunctions[ a:file ]')
-    let g:p5sfunctions[a:file] = libperl#grep_file_functions( a:file )
+    let g:p5sfunctions[a:file] = s:GrepFileFunctions(a:file)
   endif
 
   let subs = g:p5sfunctions[a:file]
@@ -69,7 +97,7 @@ endf
 
 fun! s:CompletePackageFunctions(file,base)
   " let class_comp = { 'class': class , 'refer': '' , 'functions': [ ] }
-  let funcs = libperl#grep_file_functions( a:file )
+  let funcs = s:GrepFileFunctions( a:file )
   cal s:FuncCompAdd( a:base , funcs )
 
   if g:plc_complete_base_class_func
