@@ -1,9 +1,7 @@
 
 
+" $var1 
+" $var2 $var3 $var4
 
-" self self self
-fun! Test()
-  echo searchpos('self','bnc')
-endf
 
-nmap zz :call Test()<CR>
+echo matches

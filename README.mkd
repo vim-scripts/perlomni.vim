@@ -1,75 +1,95 @@
 
 Screenshot
 ==========
-![](http://cloud.github.com/downloads/c9s/perl-completion.vim/Screen_shot_2009-11-19_at_7.23.06_AM.png)
-![](http://cloud.github.com/downloads/c9s/perl-completion.vim/Screen_shot_2009-11-19_at_7.23.34_AM.png)
-![](http://cloud.github.com/downloads/c9s/perl-completion.vim/Screen_shot_2009-11-19_at_7.24.17_AM.png)
-
 
 Install
 ========
 
-perl-completion.vim comes with some depended vim scripts (libperl.vim and
-search-window.vim) and perl-completion.vim is using PPI (pure perl parser) to
-parse perl syntax to make completions.
-
-the util scripts will be installed to `~/.vim/bin/` , so please add `~/.vim/bin/`
-to your $PATH env variable.  add this to your .bashrc or .zshrc:
-
-    export PATH=~/.vim/bin/:$PATH
-
-under the perl-completion.vim directory there is a META file, which noted the
-version and dependencies.  VIM::Packager is for solving dependency problem.
-please install VIM::Packager first:
-
-    $ sudo cpan VIM::Packager
-
-and the perl code parsing stuff needs PPI:
-
-    $ sudo cpan PPI
-
-then we use vim-packager script to generate Makefile:
-
-    $ vim-packager build
-
-then install:
+just run make:
 
     $ make install
 
-to enable perl-completion.vim omni completion, you have to enable your filetype
-plugin on. pre-append those settings to your `.vimrc`:
+and add ~/.vim/bin/ to your $PATH env variable , for example, add these lines to your .bashrc or .zshrc:
+
+    export PATH=~/.vim/bin:$PATH
+
+please make sure you've enable filetype plugin your `.vimrc`:
 
     filetype on
     filetype plugin on
     filetype indent on
 
-
 Usage
 =====
 
- C-x C-o to emit omnicompletion.
+In insert mode , press C-x C-o to emit omnicompletion.
 
-Options
-==========
-
-complete builtin functions by default
-
-    let g:def_perl_comp_bfunction = 1
-
-complete package names by default
-
-    let g:def_perl_comp_packagen  = 1
-
-Uninstall
-=========
-
-    $ make uninstall
-
-Dev
-===
-
-    $ make link
+Samples
+=======
 
 
+    " SAMPLES {{{
+
+    extends 'Moose::Meta::Attribute';
+    extends 'AAC::Pvoice';
+
+    " module compeltion
+    my $obj = new B::C;
 
 
+    " complete class methods
+    Jifty::DBI::Record->
+
+    " complete built-in function
+    seekdir see
+
+
+    " $self completion
+    "   my $self
+    " to 
+    "   my $self = shift;
+    my $self
+
+    " complete current object methods
+    sub testtest { }
+    sub foo1 { }
+    sub foo2 { }
+
+    $self->
+
+    " smart object method completion
+    my $var = new Jifty;
+    $var->
+
+    " smart object method completion 2
+    my $var = Jifty::DBI->new;
+    $var->
+
+    my %hash = ( );
+    my @array = ( );
+
+    " complete variable
+    $var1 $var2 $var3 $var_test $var__adfasdf
+    $var__adfasd  $var1 
+
+
+    " moose complete
+
+    has url => (
+        metaclass => 'Labeled',
+        is        => 'rw',
+        isa       => 'Str',
+        label     => "The site's URL",
+    );
+
+    " role
+
+    with 'Restartable' => {
+        -alias => {
+            stop  => '_stop',
+            start => '_start'
+        },
+        -excludes => [ 'stop', 'start' ],
+    };
+
+    " }}}
