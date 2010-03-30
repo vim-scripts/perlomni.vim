@@ -94,10 +94,10 @@ fun! s:locateClassFile(class)
     endif
 
     let paths = split(&path,',')
-    " FOR DEBUG
-    if &filetype != 'perl'
+    if g:perlomni_use_perlinc || &filetype != 'perl'
         let paths = split( system("perl -e 'print join(\",\",@INC)'") ,',')
     endif
+
     let filepath = substitute(a:class,'::','/','g') . '.pm'
     cal insert(paths,'lib')
     for path in paths
@@ -363,7 +363,7 @@ fun! s:CompBufferFunction(base,context)
 endf
 
 fun! s:CompClassFunction(base,context)
-    let class = substitute(a:context,'->$','','')
+    let class = matchstr(a:context,'[a-zA-Z0-9:]\+\(->\)\@=')
     let l:cache = GetCacheNS('classfunc',class.'_'.a:base)
     if type(l:cache) != type(0)
         return l:cache
@@ -438,6 +438,8 @@ fun! s:CompClassName(base,context)
         let classnames = CPANParseSourceList( sourcefile )
         let g:cpan_mod_cache = classnames
     endif
+    cal extend(classnames, s:scanClass('lib'))
+
     let result = s:StringFilter(classnames,a:base)
 
     if len(result) > g:perlomni_max_class_length 
@@ -561,11 +563,16 @@ endf
 " }}}
 " SCANNING FUNCTIONS {{{
 fun! s:scanClass(path)
+    if ! isdirectory(a:path)
+        return [ ]
+    endif
     let l:files = split(glob(a:path . '/**'))
     cal filter(l:files, 'v:val =~ "\.pm$"')
-    cal map(l:files, 'strpart(v:val,strlen(a:path))')
+    cal map(l:files, 'strpart(v:val,strlen(a:path)+1,strlen(v:val)-strlen(a:path)-4)')
+    cal map(l:files, 'substitute(v:val,''/'',"::","g")')
     return l:files
 endf
+" echo s:scanClass(expand('~/aiink/aiink/lib'))
 
 fun! s:scanObjectVariableLines(lines)
     let buffile = tempname()
@@ -695,6 +702,7 @@ endf
 "
 " Moose Completion Rules {{{
 cal s:addRule({ 'only':1, 'head': '^has\s\+\w\+' , 'context': '\s\+is\s*=>\s*$'  , 'backward': '[''"]\?\w*$' , 'comp': function('s:CompMooseIs') } )
+" cal s:addRule({ 'only':1, 'head': '^has\s\+\w\+' , 'context': '\s\+isa\s*=>\s*$' , 'backward': '[''"]\?[a-zA-Z0-9_:\[\]]*$' , 'comp': function('s:CompMooseIsa') } )
 cal s:addRule({ 'only':1, 'head': '^has\s\+\w\+' , 'context': '\s\+isa\s*=>\s*$' , 'backward': '[''"]\?\S*$' , 'comp': function('s:CompMooseIsa') } )
 
 cal s:addRule({ 'only':1, 'head': '^has\s\+\w\+' , 'context': '^\s*$' , 'backward': '\w*$', 'comp': function('s:CompMooseAttribute') } )
@@ -740,9 +748,12 @@ setlocal omnifunc=PerlComplete
 cal s:defopt('perlomni_max_class_length',100)
 cal s:defopt('perlomni_sort_class_by_lenth',0)
 cal s:defopt('perlomni_use_cache',1)
+cal s:defopt('perlomni_use_perlinc',1)
 
 finish
 " SAMPLES {{{
+
+
 
 extends 'Moose::Meta::Attribute';
 use base qw(App::CLI);
@@ -750,7 +761,6 @@ use base qw(App::CLI);
 " module compeltion
 my $obj = new Jifty::Web;
 $obj->
-
 
 my $cgi = new CGI;
 print $cgi->
@@ -807,7 +817,7 @@ has url => (
     metaclass => 'Labeled',
     is        => 'rw',
     label     => "The site's URL",
-    isa => 'AFS::Object::Server',
+    isa => 'AFS::Object',
 );
 
 " role
