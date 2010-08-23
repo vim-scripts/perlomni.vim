@@ -60,7 +60,7 @@ README_FILES=`ls -1 | grep -i readme`
 WGET_OPT=-c -nv
 CURL_OPT=
 RECORD_SCRIPT=.mkrecord
-TAR=tar czvHf
+TAR=tar cvzf
 
 # INTERNAL FUNCTIONS {{{
 record_file = \
@@ -114,6 +114,13 @@ fetch_github = \
 fetch_local = @cp -v $(1) $(2) \
 		; @echo $(2) >> .bundlefiles
 
+# 1: NAME , 2: URI
+dep_from_git = \
+		D=/tmp/$(1)-$$RANDOM ; git clone $(2) $$D ; cd $$D ; make install ; 
+
+dep_from_svn = \
+		D=/tmp/$(1)-$$RANDOM ; svn checkout $(2) $$D ; cd $$D ; make install ;
+
 # }}}
 # }}}
 # ======= DEFAULT CONFIG ======= {{{
@@ -155,6 +162,7 @@ MKFILES=Makefile `ls -1 | grep '.mk$$'`
 # 	  $(call fetch_url,[file url],[target path])
 # 	  $(call fetch_local,[from],[to])
 
+SHELL=bash
 
 CONFIG_FILE=config.mk
 -include ~/.vimauthor.mk
@@ -207,6 +215,7 @@ release:
 	fi
 
 pure-install:
+	@echo "Using Shell:" $(SHELL) 
 	@echo "Installing"
 	@if [[ -n "$(DIRS)" ]] ; then find $(DIRS) -type f | while read file ; do \
 			cp -v $$file $(VIMRUNTIME)/$$file ; done ; fi

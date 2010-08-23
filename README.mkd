@@ -4,6 +4,14 @@ Screencast
 
 http://www.youtube.com/watch?v=hZ7871WcIv0
 
+
+Description
+===========
+
+perl-completion plugin supports basic perl completion and Moose / DBIx::Class completion.
+
+the rules could be easily extended. see ( ftplugin/perl/perlomni.vim )
+
 Install
 ========
 
@@ -24,8 +32,9 @@ please make sure you've enable filetype plugin your `.vimrc`:
 Usage
 =====
 
-In insert mode , press C-x C-o to emit omnicompletion.
+In insert mode , press C-x C-o to emit omni completion.
 
+P.S. The completion works in terminal vim is faster than gvim/MacVim.
 
 Write your perl omni completion extensions
 =========================================

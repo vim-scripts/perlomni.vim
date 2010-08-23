@@ -8,32 +8,62 @@ let s:debug_flag = 0
 runtime 'plugin/perlomni-data.vim'
 runtime 'plugin/perlomni-util.vim'
 
+let s:vimbin = globpath(&rtp, 'bin/')
+
 " Warning {{{
-if ! executable('grep-objvar.pl')
-            \ && ! executable('grep-pattern.pl')
-    echo "Please add ~/.vim/bin to your PATH env variable."
-    echo "And make them executable."
-    echo "For example:"
-    echo ""
-    echo "  export PATH=~/.vim/bin/:$PATH"
-    echo ""
-    echo "And Run:"
-    echo ""
-    echo "  $ chmod +x ~/.vim/bin/grep-*.pl "
-    echo ""
+if ! filereadable(s:vimbin.'grep-objvar.pl')
+            \ && ! filereadable(s:vimbin.'grep-pattern.pl')
+    echo "Please install scripts to ~/.vim/bin"
     finish
 endif
 " }}}
+
+" Wrapped system() Function. {{{
+fun! s:system(...)
+    let cmd = ''
+    if has('win32')
+        let ext = toupper(substitute(a:1, '^.*\.', '.', ''))
+        if !len(filter(split($PATHEXT, ';'), 'toupper(v:val) == ext'))
+            if ext == '.PL' && executable('perl') 
+                let cmd = 'perl'
+            elseif ext == '.PY' && executable('python') 
+                let cmd = 'python' 
+            elseif ext == '.RB' && executable('ruby') 
+                let cmd = 'ruby' 
+            endif
+        endif
+        for a in a:000
+            if len(cmd) | let cmd .= ' ' | endif
+            if substitute(substitute(a, '\\.', '', 'g'), '\([''"]\).*\1', '', 'g') =~ ' ' || (a != '|' && a =~ '|') || a =~ '[()]' | let a = '"' . substitute(a, '"', '"""', 'g') . '"' | endif
+            let cmd .= a
+        endfor
+    else
+        for a in a:000
+            if len(cmd) | let cmd .= ' ' | endif
+            if substitute(substitute(a, '\\.', '', 'g'), '\([''"]\).*\1', '', 'g') =~ ' ' || (a != '|' && a =~ '|') || a =~ '[()]' | let a = shellescape(a) | endif
+            let cmd .= a
+        endfor
+    endif
+    return system(cmd)
+endfunction
+" }}}
+
 
 " Public API {{{
 
 " Rule
 fun! AddPerlOmniRule(hash)
-    cal s:addRule(a:hash)
+    cal s:rule(a:hash)
 endf
 
 " Cache Function. {{{
+let s:last_cache_ts = localtime()
 fun! GetCacheNS(ns,key)
+    if localtime() - s:last_cache_ts > g:perlomni_cache_expiry
+        let s:last_cache_ts = localtime()
+        return 0
+    endif
+
     if ! g:perlomni_use_cache
         return 0
     endif
@@ -64,8 +94,8 @@ fun! s:baseClassFromFile(file)
     if type(l:cache) != type(0)
         return l:cache
     endif
-    let list = split(system('grep-pattern.pl ' . a:file . 
-        \ ' ''^(?:use\s+(?:base|parent)\s+|extends\s+)(.*);''' ),"\n")
+    let list = split(s:system(s:vimbin.'grep-pattern.pl', a:file, 
+        \ '^(?:use\s+(?:base|parent)\s+|extends\s+)(.*);'),"\n")
     let classes = [ ]
     for i in range(0,len(list)-1)
         let list[i] = substitute(list[i],'^\(qw[(''"\[]\|(\|[''"]\)\s*','','')
@@ -87,6 +117,24 @@ endf
 " echo s:findBaseClass( 'Jifty::Record' )
 " }}}
 
+fun! s:findCurrentClassBaseClass()
+    let all_mods = [ ]
+    for i in range( line('.') , 0 , -1 )
+        let line = getline(i)
+        if line =~ '^package\s\+'
+            break
+        elseif line =~ '^\(use\s\+\(base\|parent\)\|extends\)\s\+'
+            let args =  matchstr( line , 
+                        \ '\(^\(use\s\+\(base\|parent\)\|extends\)\s\+\(qw\)\=[''"(\[]\)\@<=\_.*\([\)\]''"]\s*;\)\@=' )
+            let args = substitute( args  , '\_[ ]\+' , ' ' , 'g' )
+            let mods = split(  args , '\s' )
+            cal extend( all_mods , mods )
+        endif
+    endfor
+    return all_mods
+endf
+
+
 fun! s:locateClassFile(class)
     let l:cache = GetCacheNS('clsfpath',a:class)
     if type(l:cache) != type(0)
@@ -95,7 +143,7 @@ fun! s:locateClassFile(class)
 
     let paths = split(&path,',')
     if g:perlomni_use_perlinc || &filetype != 'perl'
-        let paths = split( system("perl -e 'print join(\",\",@INC)'") ,',')
+        let paths = split( s:system('perl', '-e', 'print join(",",@INC)') ,',')
     endif
 
     let filepath = substitute(a:class,'::','/','g') . '.pm'
@@ -110,7 +158,7 @@ endf
 " echo s:locateClassFile('Jifty::DBI')
 " echo s:locateClassFile('No')
 
-fun! s:addRule(hash)
+fun! s:rule(hash)
     cal add( s:rules , a:hash )
 endf
 
@@ -164,6 +212,12 @@ fun! s:parseParagraphHead(fromLine)
 endf
 
 fun! PerlComplete(findstart, base)
+
+    if ! exists('b:lines')
+        " max 200 lines , to '$' will be very slow
+        let b:lines = getline( 1, 200 )
+    endif
+
     let line = getline('.')
     let lnum = line('.')
     let start = col('.') - 1
@@ -183,6 +237,8 @@ fun! PerlComplete(findstart, base)
         let first_bwidx = -1
 
         for rule in s:rules
+
+
             let match = matchstr( b:lcontext , rule.backward )
             if strlen(match) > 0
                 let bwidx   = strridx( b:lcontext , match )
@@ -228,8 +284,27 @@ fun! PerlComplete(findstart, base)
             " echo string(rule.comp) . ' regexp: "' . rule.context . '" ' . "lcontext:'" .lefttext . "'" .  " basetext:'" .basetext . "'"
             " sleep 3
 
-            if ( has_key( rule ,'head') && b:paragraph_head =~ rule.head && lefttext =~ rule.context ) ||
-                    \ ( ! has_key(rule,'head') && lefttext =~ rule.context  )
+
+            if ( has_key( rule ,'head') 
+                    \ && b:paragraph_head =~ rule.head 
+                    \ && lefttext =~ rule.context ) 
+                \ || ( ! has_key(rule,'head') && lefttext =~ rule.context  )
+
+                if has_key( rule ,'contains' ) 
+                    let l:text = rule.contains
+                    let l:found = 0
+                    " check content
+                    for line in b:lines 
+                        if l:text =~ rule.contains 
+                            let l:found = 1
+                            break
+                        endif
+                    endfor
+                    if ! l:found 
+                        " next rule
+                        continue
+                    endif
+                endif
 
                 if type(rule.comp) == type(function('tr'))
                     cal extend(b:comps, call( rule.comp, [basetext,lefttext] ) )
@@ -253,6 +328,11 @@ fun! PerlComplete(findstart, base)
     else 
         return b:comps
     endif
+
+
+
+
+
 endf
 
 let s:rules = [ ]
@@ -288,7 +368,11 @@ fun! s:CompMooseAttribute(base,context)
     let values = [ 'default' , 'is' , 'isa' , 
                 \ 'label' , 'predicate', 'metaclass', 'label', 
                 \ 'expires_after', 
-                \ 'refresh_with' , 'required' ]
+                \ 'refresh_with' , 'required' , 'coerce' , 'does' , 'required',
+                \ 'weak_ref' , 'lazy' , 'auto_deref' , 'trigger', 
+                \ 'handles' , 'traits' , 'builder' , 'clearer',
+                \ 'predicate' , 'lazy_build', 'initializer', 'documentation' ]
+    cal map(values,'v:val . " => "')
     return s:StringFilter(values,a:base)
 endf
 
@@ -297,7 +381,10 @@ fun! s:CompMooseRoleAttr(base,context)
     return s:StringFilter(attrs,a:base)
 endf
 fun! s:CompMooseStatement(base,context)
-    let sts = [ 'extends' , 'after' , 'before', 'has' , 'requires' , 'with' , 'override' , 'method' ]
+    let sts = [ 
+        \'extends' , 'after' , 'before', 'has' , 
+        \'requires' , 'with' , 'override' , 'method',
+        \'super', 'around', 'inner', 'augment', 'confess' , 'blessed' ]
     return s:StringFilter(sts,a:base)
 endf
 " }}}
@@ -344,6 +431,18 @@ endf
 fun! s:CompFunction(base,context)
     return s:StringFilter(g:p5bfunctions,a:base)
 endf
+
+fun! s:CompCurrentBaseFunction(base,context)
+    let all_mods = s:findCurrentClassBaseClass()
+    let funcs = [ ] 
+    for mod in all_mods 
+        let sublist = s:scanFunctionFromClass(mod)
+        cal extend(funcs,sublist)
+    endfor
+    return funcs
+endf
+" echo s:CompCurrentBaseFunction('','$self->')
+" sleep 1
 
 fun! s:CompBufferFunction(base,context)
     let l:cache = GetCacheNS('buf_func',a:base.expand('%'))
@@ -465,6 +564,7 @@ fun! s:CompClassName(base,context)
     endif
     return SetCacheNS('class',a:base,result)
 endf
+" echo s:CompClassName('Moose::','')
 
 fun! s:SortByLength(i1, i2)
     return strlen(a:i1) == strlen(a:i2) ? 0 : strlen(a:i1) > strlen(a:i2) ? 1 : -1
@@ -493,14 +593,17 @@ fun! CPANParseSourceList(file)
   if ! exists('g:cpan_mod_cachef')
     let g:cpan_mod_cachef = expand('~/.vim-cpan-module-cache')
   endif
-  if executable('zcat')
-    let cmd = 'zcat ' . a:file . " | grep -v '^[0-9a-zA-Z-]*: '  | cut -d' ' -f1 > " . g:cpan_mod_cachef
-  else
-    let cmd = 'cat ' . a:file . " | gunzip | grep -v '^[0-9a-zA-Z-]*: '  | cut -d' ' -f1 > " . g:cpan_mod_cachef
-  endif
-  echo system( cmd )
-  if v:shell_error 
-    echoerr v:shell_error
+  if !filereadable(g:cpan_mod_cachef) || getftime(g:cpan_mod_cachef) < getftime(a:file)
+    let args = []
+    if executable('zcat')
+      let args = ['zcat', a:file, '|' , 'grep', '-Ev', '^[A-Za-z0-9-]+: ', '|', 'cut', '-d" "', '-f1', '>', g:cpan_mod_cachef]
+    else
+      let args = ['cat', a:file, '|', 'gunzip', '|', 'grep', '-Ev', '^[A-Za-z0-9-]+: ', '|', 'cut', '-d" "', '-f1', '>', g:cpan_mod_cachef]
+    endif
+    call call(function("s:system"), args)
+    if v:shell_error 
+      echoerr v:shell_error
+    endif
   endif
   return readfile( g:cpan_mod_cachef )
 endf
@@ -524,7 +627,7 @@ fun! CPANSourceLists()
   endfor
 
   " not found
-  cal s:echo("CPAN source list not found.")
+  echo "CPAN source list not found."
   let f = expand('~/.cpan/sources/modules/02packages.details.txt.gz')
   " XXX: refactor me !!
   if ! isdirectory( expand('~/.cpan') )
@@ -539,7 +642,7 @@ fun! CPANSourceLists()
     cal mkdir( expand('~/.cpan/sources/modules') )
   endif
 
-  cal s:echo("Downloading CPAN source list.")
+  echo "Downloading CPAN source list."
   if executable('curl')
     exec '!curl http://cpan.nctu.edu.tw/modules/02packages.details.txt.gz -o ' . f
     return f
@@ -563,6 +666,10 @@ endf
 " }}}
 " SCANNING FUNCTIONS {{{
 fun! s:scanClass(path)
+    let l:cache = GetCacheNS('classpath', a:path)
+    if type(l:cache) != type(0)
+        return l:cache
+    endif
     if ! isdirectory(a:path)
         return [ ]
     endif
@@ -570,14 +677,14 @@ fun! s:scanClass(path)
     cal filter(l:files, 'v:val =~ "\.pm$"')
     cal map(l:files, 'strpart(v:val,strlen(a:path)+1,strlen(v:val)-strlen(a:path)-4)')
     cal map(l:files, 'substitute(v:val,''/'',"::","g")')
-    return l:files
+    return SetCacheNS('classpath',a:path,l:files)
 endf
 " echo s:scanClass(expand('~/aiink/aiink/lib'))
 
 fun! s:scanObjectVariableLines(lines)
     let buffile = tempname()
     cal writefile(a:lines,buffile)
-    let varlist = split(system('grep-objvar.pl ' . buffile . ' '),"\n") 
+    let varlist = split(s:system(s:vimbin.'grep-objvar.pl', buffile),"\n") 
     let b:objvarMapping = { }
     for item in varlist
         let [varname,classname] = split(item)
@@ -597,7 +704,7 @@ fun! s:scanObjectVariableFile(file)
 "         return l:cache
 "     endif
 
-    let list = split(system('grep-objvar.pl ' . expand(a:file) . ' '),"\n") 
+    let list = split(s:system(s:vimbin.'grep-objvar.pl', expand(a:file)),"\n") 
     let b:objvarMapping = { }
     for item in list
         let [varname,classname] = split(item)
@@ -616,7 +723,7 @@ endf
 fun! s:scanHashVariable(lines)
     let buffile = tempname()
     cal writefile(a:lines,buffile)
-    return split(system('grep-pattern.pl ' . buffile . ' ''%(\w+)'' | sort | uniq '),"\n") 
+    return split(s:system(s:vimbin.'grep-pattern.pl', buffile, '%(\w+)', '|', 'sort', '|', 'uniq'),"\n") 
 endf
 " echo s:scanHashVariable( getline(1,'$') )
 
@@ -624,37 +731,37 @@ endf
 fun! s:scanQString(lines)
     let buffile = tempname()
     cal writefile( a:lines, buffile)
-    let cmd = system('grep-pattern.pl '.buffile.' ''[''](.*?)(?<!\\)['']''')
+    let cmd = s:system(s:vimbin.'grep-pattern.pl', buffile, '[''](.*?)(?<!\\)['']')
     return split( cmd ,"\n")
 endf
 
 fun! s:scanQQString(lines)
     let buffile = tempname()
     cal writefile( a:lines, buffile)
-    return split(system('grep-pattern.pl '.buffile.' ''["](.*?)(?<!\\)["]'''),"\n")
+    return split(s:system(s:vimbin.'grep-pattern.pl', buffile, '["](.*?)(?<!\\)["]'),"\n")
 endf
 " echo s:scanQQStringFile('testfile')
 
 fun! s:scanArrayVariable(lines)
     let buffile = tempname()
     cal writefile(a:lines,buffile)
-    return split(system('grep-pattern.pl ' . buffile . ' ''@(\w+)'' | sort | uniq '),"\n") 
+    return split(s:system(s:vimbin.'grep-pattern.pl', buffile, '@(\w+)', '|', 'sort', '|', 'uniq'),"\n")
 endf
 
 fun! s:scanVariable(lines)
     let buffile = tempname()
     cal writefile(a:lines,buffile)
-    return split(system('grep-pattern.pl ' . buffile . ' ''\$(\w+)'' | sort | uniq '),"\n") 
+    return split(s:system(s:vimbin.'grep-pattern.pl', buffile, '\$(\w+)', '|', 'sort', '|', 'uniq'),"\n") 
 endf
 
 fun! s:scanFunctionFromList(lines)
     let buffile = tempname()
     cal writefile(a:lines,buffile)
-    return split(system('grep-pattern.pl ' . buffile . ' ''^\s*(?:sub|has)\s+(\w+)'' | sort | uniq '),"\n")
+    return split(s:system(s:vimbin.'grep-pattern.pl', buffile, '^\s*(?:sub|has)\s+(\w+)', '|', 'sort', '|', 'uniq'),"\n")
 endf
 
 fun! s:scanFunctionFromSingleClassFile(file)
-    return split(system('grep-pattern.pl ' . a:file . ' ''^\s*(?:sub|has)\s+(\w+)'' | sort | uniq '),"\n")
+    return split(s:system(s:vimbin.'grep-pattern.pl', a:file, '^\s*(?:sub|has)\s+(\w+)', '|', 'sort', '|', 'uniq'),"\n")
 endf
 
 fun! s:scanFunctionFromClass(class)
@@ -677,7 +784,7 @@ fun! s:scanFunctionFromBaseClassFile(file)
 "     echo 'sub:' . a:file
     let classes = s:baseClassFromFile(a:file)
     for cls in classes
-
+        unlet! l:cache
         let l:cache = GetCacheNS('classfile_funcs',cls)
         if type(l:cache) != type(0)
             cal extend(l:funcs,l:cache)
@@ -700,43 +807,175 @@ endf
 " RULES {{{
 " rules have head should be first matched , because of we get first backward position.
 "
+
+" XXX: provide a dictinoary loader
+fun! s:DBIxCompMethod(base,context)
+    return s:StringFilter([ 
+        \ "table" , "table_class" , "add_columns" , 
+        \ "set_primary_key" , "has_many" ,
+        \ "many_to_many" , "belongs_to" , "add_columns" ,
+        \ "might_have" , 
+        \ "has_one",
+        \ "add_unique_constraint",
+        \ "resultset_class",
+        \ "load_namespaces",
+        \ "load_components",
+        \ "load_classes",
+        \ "resultset_attributes" , 
+        \ "result_source_instance" ,
+        \ "mk_group_accessors",
+        \ "storage"
+        \ ],a:base)
+endf
+
+
+" DBIx::Class::Core completion
+"   use contains to check file content, do complete dbix methods if and only
+"   if there is a DBIx::Class::Core
+"
+" because there is a rule take 'only' attribute, 
+" so the rest rules willn't be check.
+" for the reason , put the dbix completion rule before them.
+" will take a look later ... (I hope)
+cal s:rule({
+    \'context': '^__PACKAGE__->$',
+    \'contains': 'DBIx::Class::Core',
+    \'backward': '\w*$',
+    \'comp':    function('s:DBIxCompMethod')
+    \})
+
+
 " Moose Completion Rules {{{
-cal s:addRule({ 'only':1, 'head': '^has\s\+\w\+' , 'context': '\s\+is\s*=>\s*$'  , 'backward': '[''"]\?\w*$' , 'comp': function('s:CompMooseIs') } )
-" cal s:addRule({ 'only':1, 'head': '^has\s\+\w\+' , 'context': '\s\+isa\s*=>\s*$' , 'backward': '[''"]\?[a-zA-Z0-9_:\[\]]*$' , 'comp': function('s:CompMooseIsa') } )
-cal s:addRule({ 'only':1, 'head': '^has\s\+\w\+' , 'context': '\s\+isa\s*=>\s*$' , 'backward': '[''"]\?\S*$' , 'comp': function('s:CompMooseIsa') } )
+cal s:rule({ 
+    \'only':1, 
+    \'head': '^has\s\+\w\+' , 
+    \'context': '\s\+is\s*=>\s*$'  , 
+    \'backward': '[''"]\?\w*$' , 
+    \'comp': function('s:CompMooseIs') } )
+cal s:rule({ 
+    \'only':1, 
+    \'head': '^has\s\+\w\+' , 
+    \'context': '\s\+\(isa\|does\)\s*=>\s*$' , 
+    \'backward': '[''"]\?\S*$' , 
+    \'comp': function('s:CompMooseIsa') } )
+cal s:rule({ 'only':1, 'head': '^has\s\+\w\+' , 
+    \'context': '\s\+\(reader\|writer\|clearer\|predicate\|builder\)\s*=>\s*[''"]$' , 
+    \'backward': '\w*$', 
+    \'comp': function('s:CompBufferFunction') })
 
-cal s:addRule({ 'only':1, 'head': '^has\s\+\w\+' , 'context': '^\s*$' , 'backward': '\w*$', 'comp': function('s:CompMooseAttribute') } )
-cal s:addRule({ 'only':1, 'head': '^with\s\+', 'context': '^\s*-$', 'backward': '\w\+$', 'comp': function('s:CompMooseRoleAttr') } )
+cal s:rule({ 
+    \'only':1, 
+    \'head': '^has\s\+\w\+' , 
+    \'context': '^\s*$' , 
+    \'backward': '\w*$', 
+    \'comp': function('s:CompMooseAttribute') } )
 
-cal s:addRule({ 'context': '^\s*$', 'backward': '\w\+$', 'comp':function('s:CompMooseStatement')})
+cal s:rule({ 
+    \'only':1, 
+    \'head': '^with\s\+', 
+    \'context': '^\s*-$', 
+    \'backward': '\w\+$', 
+    \'comp': function('s:CompMooseRoleAttr') } )
+
+cal s:rule({ 
+    \'context': '^\s*$', 
+    \'backward': '\w\+$', 
+    \'comp':function('s:CompMooseStatement')})
+
 " }}}
 " Core Completion Rules {{{
-cal s:addRule({'only':1, 'context': '^=$', 'backward': '\w*$', 'comp': function('s:CompPodHeaders') })
+cal s:rule({'only':1, 'context': '^=$', 'backward': '\w*$', 'comp': function('s:CompPodHeaders') })
+
 
 " class name completion
-cal s:addRule({'only':1, 'context': '\<\(new\|use\)\s\+$' , 'backward': '\<[A-Z][a-z0-9_:]*$', 'comp': function('s:CompClassName') } )
-cal s:addRule({'only':1, 'context': '^extends\s\+''$' , 'backward': '\<[A-Z][a-z0-9_:]*$', 'comp': function('s:CompClassName') } )
-cal s:addRule({'only':1, 'context': '^use \(base\|parent\)\s\+$' , 'backward': '\<[A-Z][a-z0-9_:]*$', 'comp': function('s:CompClassName') } )
-cal s:addRule({'only':1, 'context': '^\s*my\s\+\$self$' , 'backward': '\s*=\s\+shift;', 'comp': [ ' = shift;' ] })
+"  matches:
+"     new [ClassName]
+"     use [ClassName]
+"     use base qw(ClassName ...
+"     use base 'ClassName
 
+cal s:rule({
+    \'only':1, 
+    \'context': '\<\(new\|use\)\s\+\(\(base\|parent\)\s\+\(qw\)\?[''"(/]\)\?$' , 
+    \'backward': '\<[A-Z][a-z0-9_:]*$', 
+    \'comp': function('s:CompClassName') } )
+
+
+cal s:rule({
+    \'only':1, 
+    \'context': '^extends\s\+[''"]$' , 
+    \'backward': '\<\u[A-Za-z0-9_:]*$', 
+    \'comp': function('s:CompClassName') } )
+
+cal s:rule({
+    \'context': '^\s*\(sub\|method\)\s\+'              , 
+    \'backward': '\<\w\+$' , 
+    \'only':1 , 
+    \'comp': function('s:CompCurrentBaseFunction') })
+
+cal s:rule({
+    \'only':1, 
+    \'context': '^\s*my\s\+\$self$' , 
+    \'backward': '\s*=\s\+shift;', 
+    \'comp': [ ' = shift;' ] })
 
 " variable completion
-cal s:addRule({'only':1, 'context': '\s*\$$' , 'backward': '\<\w\+$' , 'comp': function('s:CompVariable') })
-cal s:addRule({'only':1, 'context': '%$', 'backward': '\<\w\+$', 'comp': function('s:CompHashVariable') })
-cal s:addRule({'only':1, 'context': '@$', 'backward': '\<\w\+$', 'comp': function('s:CompArrayVariable') })
 
-cal s:addRule({'only':1, 'context': '&$', 'backward': '\<\w\+$', 'comp': function('s:CompBufferFunction') })
+cal s:rule({
+    \'only':1, 
+    \'context': '\s*\$$' , 
+    \'backward': '\<\U\w*$' , 
+    \'comp': function('s:CompVariable') })
+
+cal s:rule({
+    \'only':1, 
+    \'context': '%$', 
+    \'backward': '\<\U\w\+$', 
+    \'comp': function('s:CompHashVariable') })
+
+cal s:rule({
+    \'only':1, 
+    \'context': '@$', 
+    \'backward': '\<\U\w\+$', 
+    \'comp': function('s:CompArrayVariable') })
+
+cal s:rule({
+    \'only':1, 
+    \'context': '&$', 
+    \'backward': '\<\U\w\+$', 
+    \'comp': function('s:CompBufferFunction') })
 
 " function completion
-cal s:addRule({'context': '\(->\|\$\)\@<!$', 'backward': '\<\w\+$' , 'comp': function('s:CompFunction') })
-cal s:addRule({'context': '\$self->$'  , 'backward': '\<\w\+$' , 'only':1 , 'comp': function('s:CompBufferFunction') })
-cal s:addRule({'context': '\$\w\+->$'  , 'backward': '\<\w\+$' , 'comp': function('s:CompObjectMethod') })
-cal s:addRule({'context': '\<[a-zA-Z0-9:]\+->$'    , 'backward': '\w*$' , 'comp': function('s:CompClassFunction') })
+cal s:rule({
+    \'context': '\(->\|\$\)\@<!$',        
+    \'backward': '\<\w\+$' , 
+    \'comp': function('s:CompFunction') })
+
+cal s:rule({'context': '\$\(self\|class\)->$'  , 
+    \'backward': '\<\w\+$' , 
+    \'only':1 , 
+    \'comp': function('s:CompBufferFunction') })
+
+cal s:rule({
+    \'context': '\$\w\+->$'  ,            
+    \'backward': '\<\w\+$' , 
+    \'comp': function('s:CompObjectMethod') })
+
+cal s:rule({
+    \'context': '\<[a-zA-Z0-9:]\+->$'  ,  
+    \'backward': '\w*$' , 
+    \'comp': function('s:CompClassFunction') })
+
+cal s:rule({
+    \'context': '$' , 
+    \'backward': '\<\u\w*::[a-zA-Z0-9:]*$', 
+    \'comp': function('s:CompClassName') } )
+
 
 
 
 " string completion
-" cal s:addRule({'context': '\s''', 'backward': '\_[^'']*$' , 'comp': function('s:CompQString') })
+" cal s:rule({'context': '\s''', 'backward': '\_[^'']*$' , 'comp': function('s:CompQString') })
 
 " }}}
 
@@ -745,95 +984,8 @@ cal s:addRule({'context': '\<[a-zA-Z0-9:]\+->$'    , 'backward': '\w*$' , 'comp'
 setlocal omnifunc=PerlComplete
 
 " Configurations
-cal s:defopt('perlomni_max_class_length',100)
+cal s:defopt('perlomni_cache_expiry',30)
+cal s:defopt('perlomni_max_class_length',40)
 cal s:defopt('perlomni_sort_class_by_lenth',0)
 cal s:defopt('perlomni_use_cache',1)
 cal s:defopt('perlomni_use_perlinc',1)
-
-finish
-" SAMPLES {{{
-
-
-
-extends 'Moose::Meta::Attribute';
-use base qw(App::CLI);
-
-" module compeltion
-my $obj = new Jifty::Web;
-$obj->
-
-my $cgi = new CGI;
-print $cgi->
-
-" complete class methods
-Jifty::DBI::Record->
-Jifty->
-Moose->
-
-" complete built-in function
-seekdir splice 
-
-
-" $self completion
-"   my $self
-" to 
-"   my $self = shift;
-my $self
-
-" complete current object methods
-sub testtest { }
-sub foo1 { }
-sub foo2 { }
-
-
-$self->
-
-\&fo
-
-" smart object method completion
-my $var = new Jifty;
-$var->
-
-" smart object method completion 2
-my $var3 = Jifty::DBI::Record->new;
-$var3->
-
-
-my $mo = Moose->new;
-$mo->
-
-
-my %hash = ( );
-my @array = ( );
-
-
-" complete variable
-$var1 $var2 $var3 $var_test $var__adfasdf
-$var__adfasd  $var1  $var_
-
-" moose complete
-
-has url => (
-    metaclass => 'Labeled',
-    is        => 'rw',
-    label     => "The site's URL",
-    isa => 'AFS::Object',
-);
-
-" role
-
-with 'Restartable' => {
-    -alias => {
-        stop  => '_stop',
-        start => '_start'
-    },
-    -excludes => [ 'stop', 'start' ],
-};
-
-# 'string' , 'string \' escpae'
-
-new Jifty::View::Declare::Page
-
-:AcpEnable
-
-" }}}
