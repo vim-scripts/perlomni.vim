@@ -5,15 +5,24 @@
 " Email:   cornelius.howl@gmail.com 
 " Version: 1.75
 let s:debug_flag = 0
+
+fun! s:debug(name,var)
+    if s:debug_flag
+        echomsg a:name . ":" . a:var
+        sleep 1
+    endif
+endf
+
 runtime 'plugin/perlomni-data.vim'
 runtime 'plugin/perlomni-util.vim'
 
 let s:vimbin = globpath(&rtp, 'bin/')
 
 " Warning {{{
-if ! filereadable(s:vimbin.'grep-objvar.pl')
-            \ && ! filereadable(s:vimbin.'grep-pattern.pl')
-    echo "Please install scripts to ~/.vim/bin"
+if ! filereadable('grep-objvar.pl')
+            \ && ! filereadable('grep-pattern.pl')
+    echomsg "Please install scripts to ~/.vim/bin"
+    cal s:debug('vimbin', s:vimbin)
     finish
 endif
 " }}}
@@ -163,12 +172,6 @@ fun! s:rule(hash)
 endf
 
 
-fun! s:debug(name,var)
-    if s:debug_flag
-        echo a:name . ":" . a:var
-        sleep 1
-    endif
-endf
 
 fun! s:defopt(name,value)
     if !exists('g:{a:name}')
